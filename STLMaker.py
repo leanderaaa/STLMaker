@@ -18,7 +18,7 @@ graph.set_box_aspect((1,1,1))
 graph.set_aspect('equal')
 graph.set_xlabel("x (mm)")
 graph.set_ylabel("y (mm)")
-graph.set_xlabel("z (mm)")
+graph.set_zlabel("z (mm)")
 #creates an origin
 graph.scatter(0,0,0, color = "black", label = "Origin")
 
@@ -51,14 +51,13 @@ class pointCloud:
 
         #retrieves only the xyz coordinates of the file found at multiples of the fidelity.
         #AKA if the fidelited is 20 then it retrieves only every 20th point of the list
-        #ie, higher fidelity means less points.
+        #ie. higher fidelity means less points.
         self.x = np.asarray((x_local)[mask][::self.fid])
         self.y = np.asarray((y_local)[mask][::self.fid])
         self.z = np.asarray((z_local)[mask][::self.fid])
         
         self.count = len(self.x)
         self.tricount = 0
-
 
     def print(self):
         try: 
@@ -83,7 +82,6 @@ class pointCloud:
             self.x = np.max(self.x) + (-1 * self.x)
         if axis == "y":
             self.y = np.max(self.y) + (-1 * self.y)
-
 
     def append(self, cloud, direction, equalizeHeight = True):
         #allows for height equalization
@@ -114,8 +112,8 @@ class pointCloud:
         #plots the points
         self.colors = self.z
         self.colormap = colormap
-        scatterplot = graph.scatter(self.x,self.y,self.z, c = self.colors, cmap = self.colormap, s = self.size)
-        #plt.colorbar(scatterplot, ax=graph, label='heights')
+        scatterplot = graph.scatter(self.x,self.y,self.z, c = self.colors, cmap = self.colormap, s = size)
+        plt.colorbar(scatterplot, ax=graph, label='heights')
         self.reset_view()
 
     def generate_surface(self):
@@ -130,46 +128,54 @@ class pointCloud:
         self.surfacecount = len(self.surfTris)
         self.tricount += self.surfacecount
 
-    def generate_sides(self):
+    def generate_pedestal(self):
         #accesses the longest convex hull using all the edge points.
         self.hull = self.Delaunay.convex_hull
-        self.hullcount = len(self.hull)
         self.sideTris = []
+        self.surfaceCoordCount = self.count
+        self.floorTris = []
+        startPoint = self.hull[0][0]
+        self.x = np.append(self.x, self.x[startPoint])
+        self.y = np.append(self.y, self.y[startPoint])
+        self.z = np.append(self.z, self.floorHeight)
+        startPoint = self.surfaceCoordCount
+        self.pedestalTris = []
         #for every two points in the hull
         for edge in self.hull:
-            p1, p2 = edge
-            #sets p1 and p2 to be the indices of where the two points are in the xyz lists
-            A = np.array([self.x[p1], self.y[p1], self.z[p1]])
-            B = np.array([self.x[p2], self.y[p2], self.z[p2]])
-
+            A, B = edge
             #smushes the two points down to the floor
-            Afloor = np.array([self.x[p1], self.y[p1], self.floorHeight])
-            Bfloor = np.array([self.x[p2], self.y[p2], self.floorHeight])
-
-            #creates two triangles, one using two mesh points and one floor point,
-            tri1 = np.array([B, A, Bfloor])
-            #the other with two floor points and one mesh point
-            tri2 = np.array([Afloor, Bfloor, A])
-            self.sideTris.append(tri1)
-            self.sideTris.append(tri2)
+            #append A
+            self.x = np.append(self.x, self.x[A])
+            self.y = np.append(self.y, self.y[A])
+            self.z = np.append(self.z, self.floorHeight)
+            Afloor = len(self.x) -1
+            #append B
+            self.x = np.append(self.x, self.x[B])
+            self.y = np.append(self.y, self.y[B])
+            self.z = np.append(self.z, self.floorHeight)
+            Bfloor = len(self.x) - 1
+            self.sideTris.append([A,B, Bfloor])
+            self.sideTris.append([A, Afloor, Bfloor])
+            self.floorTris.append([Afloor,Bfloor,startPoint]),
+            self.pedestalTris.append([A,B, Bfloor])
+            self.pedestalTris.append([A, Afloor, Bfloor])
+            self.pedestalTris.append([Afloor,Bfloor,startPoint]),
+        self.floorTris = np.array(self.floorTris)
+        self.sideTris = np.array(self.sideTris)
         self.sidecount = len(self.sideTris)
-        self.tricount += self.sidecount
-
-    def generate_floor(self):
-        self.floorTris = []
-        #starts at the first point in the hull
-        startindex = self.hull[0][0] 
-        startpoint = np.array([self.x[startindex], self.y[startindex], self.floorHeight])
-        for edge in self.hull:
-            #for every two points in the hull
-            i1, i2 = edge
-            #creates a triangle between the points and the startpoint
-            A = np.array([self.x[i1], self.y[i1], self.floorHeight])
-            B = np.array([self.x[i2], self.y[i2], self.floorHeight])
-            tri = np.array([startpoint, A,B])
-            self.floorTris.append(tri)
         self.floorcount = len(self.floorTris)
-        self.tricount += self.floorcount
+        self.pedestalTris = np.array(self.pedestalTris)
+        self.tricount = self.surfacecount +self.sidecount + self.floorcount
+        self.triangles = np.append(self.surfTris, self.pedestalTris)
+
+    def draw_pedestal(self):
+        graph.plot_trisurf(self.x, self.y, self.z, 
+                           triangles = self.sideTris,
+                           alpha = 1, linewidth = .01, edgecolor = "black", antialiased=False, shade = False)
+        graph.plot_trisurf(self.x, self.y, self.z, 
+                           triangles = self.floorTris,
+                           alpha = 1, linewidth = .01, edgecolor = "black", antialiased=False, shade = False)
+        self.reset_view()
 
     def generate_normals(self):
         #creates vectors v1 and v2 along the sides of the triangles
@@ -211,25 +217,17 @@ class pointCloud:
         print("Generating mesh...")
         print("\tGenerating surface...")
         self.generate_surface()
-        print("\tSurface generated!")
-        print("\tGenerating sides...")
-        self.generate_sides()
-        print("\tSides generated!")
-        print("\tGenerating floor...")
-        self.generate_floor()
-        print("\tFloor generated!")
         print("\tGenerating normals...")
         self.generate_normals()
-        print("\tNormals generated!")
+        print("\tGenerating pedestal...")
+        self.generate_pedestal()
+        print("Mesh generated!\n")
         self.print()
 
-    def write_surface_facet(self, index, f):
-        normal = self.normals[index]
-
+    def write_facet(self, triangle, normal, f):
         mag = np.linalg.norm(normal)
         normal = normal / mag if mag != 0 else [0, 0, 0]
 
-        triangle = self.surfTris[index]
         A = ([self.x[triangle[0]], self.y[triangle[0]], self.z[triangle[0]]])
         B = ([self.x[triangle[1]], self.y[triangle[1]], self.z[triangle[1]]])
         C = ([self.x[triangle[2]], self.y[triangle[2]], self.z[triangle[2]]])
@@ -242,55 +240,35 @@ class pointCloud:
         f.write("  endloop\n")
         f.write("endfacet\n")
 
-    def write_custom_facet(self, triangle, normal, f):
-        f.write(f"facet normal {normal[0]:.6f} {normal[1]:.6f} {normal[2]:.6f}\n")
-        f.write("  outer loop\n")
-        for vert in triangle:
-            f.write(f"    vertex {vert[0]:.6f} {vert[1]:.6f} {vert[2]:.6f}\n")
-        f.write("  endloop\n")
-        f.write("endfacet\n")
 
     def create_STL(self):
         print("Beginning file Creation!")
-        with open(self.name + ".stl" , "w") as file:
+        with open(self.name +".stl" , "w") as file:
             file.write("solid Body\n") #prints the file header
             count = 0 #used for progress bar
             #writes the surface triangles
-            for index in range(self.surfacecount):
-                self.write_surface_facet(index, file)
+            for triangle in self.surfTris:
+                self.write_facet(triangle, self.normals[count], file)
                 #prints out percent finished
                 sys.stdout.write(f"\r{np.round(((count / self.tricount) * 100), decimals = 1)}% complete ({count + 1}/{self.tricount})")
                 sys.stdout.flush()
                 count += 1
-            #writes the side triangles
-            for triangle in self.sideTris:
-                self.write_custom_facet(triangle, np.zeros(3), file)
+            #writes the pedestal triangles
+            for triangle in self.pedestalTris:
+                self.write_facet(triangle, np.zeros(3), file)
                 sys.stdout.write(f"\r{np.round(((count / self.tricount) * 100), decimals = 1)}% complete ({count + 1}/{self.tricount})")
                 sys.stdout.flush()
                 count += 1
-            
-            for triangle in self.floorTris:
-                self.write_custom_facet(triangle, np.zeros(3), file)
-                sys.stdout.write(f"\r{np.round(((count / self.tricount) * 100), decimals = 1)}% complete ({count + 1}/{self.tricount})")
-                sys.stdout.flush()
-                count += 1
-            #ends writing the solid
             file.write("endsolid")
         print("\nExport complete!")
-
-
 
 
 #creates a point cloud from the file
 cloud = pointCloud("ExampleLAZ.laz", fid = 2000)
 
 #scales the pointcloud down
-cloud.scale((2/10))
+cloud.scale((3/10))
 
 #generates the mesh
 cloud.generate_mesh()
-
-cloud.draw_surface()
-plt.show(block = True)
-
 cloud.create_STL()

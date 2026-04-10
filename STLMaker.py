@@ -2,7 +2,6 @@ import numpy as np
 import laspy
 import scipy as sp
 from scipy.spatial import Delaunay
-import numpy as np 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import sys
@@ -17,31 +16,32 @@ fig = plt.figure(
 graph = fig.add_subplot(111,projection='3d')
 graph.set_box_aspect((1,1,1))
 graph.set_aspect('equal')
-#creates an origin. Useful for debugging
+graph.set_xlabel("x (mm)")
+graph.set_ylabel("y (mm)")
+graph.set_xlabel("z (mm)")
+#creates an origin
 graph.scatter(0,0,0, color = "black", label = "Origin")
 
 
 
 
-class pointCloud:
-    def __init__(self, filename, fid = 1000, floorHeight = -5, x_bounds=None, y_bounds=None, z_bounds=None):
 
+class pointCloud:
+    def __init__(self, filename, fid = 1000, floorHeight = -5, x_bounds=None, y_bounds=None):
         #initializes the class with the file and fidelity, and scales
         self.fid = fid
-        self.size = .25
         #loads the LAZ file
         self.data = laspy.read(filename)
         self.name = filename.replace(".laz","")
 
+        #creates a mask to include or uninclude data based on x and y bounds
         mask = np.ones(len(self.data.x), dtype=bool)
         
         if x_bounds:
             mask &= (self.data.x >= x_bounds[0]) & (self.data.x <= x_bounds[1])
         if y_bounds:
             mask &= (self.data.y >= y_bounds[0]) & (self.data.y <= y_bounds[1])
-        if z_bounds:
-            mask &= (self.data.z >= z_bounds[0]) & (self.data.z <= z_bounds[1])
-        
+
         #moves all the points back towards zero
         x_local = self.data.x - np.min(self.data.x)
         y_local = self.data.y - np.min(self.data.y)
@@ -72,12 +72,13 @@ class pointCloud:
         self.z = self.z *scalar
 
     def transpose(self):
-        #rotates the mesh by 90 degrees
+        #transpose
         temp = self.x
         self.x = self.y
         self.y = temp
 
     def flip(self, axis):
+        #flips the x and y axes
         if axis == "x":
             self.x = np.max(self.x) + (-1 * self.x)
         if axis == "y":
@@ -85,6 +86,7 @@ class pointCloud:
 
 
     def append(self, cloud, direction, equalizeHeight = True):
+        #allows for height equalization
         heightDiff = np.min(self.z) - np.min(cloud.z)
         if direction == "x":
             self.x = np.append(self.x, (cloud.x + np.max(self.x)))
@@ -108,7 +110,7 @@ class pointCloud:
         graph.set_ylim(self.bounds)
         graph.set_zlim(self.bounds)
     
-    def plot_points(self, colormap = "viridis"):
+    def plot_points(self, colormap = "viridis", size = .1):
         #plots the points
         self.colors = self.z
         self.colormap = colormap
@@ -118,7 +120,6 @@ class pointCloud:
 
     def generate_surface(self):
         #smushes the points down to create a 2d 'shadow'
-
         self.twoDproj = np.vstack([self.x, self.y]).T
         
         #creates a delaunay triangle mesh
@@ -130,32 +131,39 @@ class pointCloud:
         self.tricount += self.surfacecount
 
     def generate_sides(self):
+        #accesses the longest convex hull using all the edge points.
         self.hull = self.Delaunay.convex_hull
         self.hullcount = len(self.hull)
         self.sideTris = []
-        self.floorx = np.array([])
-        self.floory = np.array([])
-        self.floorz = np.array([])
+        #for every two points in the hull
         for edge in self.hull:
             p1, p2 = edge
+            #sets p1 and p2 to be the indices of where the two points are in the xyz lists
             A = np.array([self.x[p1], self.y[p1], self.z[p1]])
             B = np.array([self.x[p2], self.y[p2], self.z[p2]])
+
+            #smushes the two points down to the floor
             Afloor = np.array([self.x[p1], self.y[p1], self.floorHeight])
             Bfloor = np.array([self.x[p2], self.y[p2], self.floorHeight])
+
+            #creates two triangles, one using two mesh points and one floor point,
             tri1 = np.array([B, A, Bfloor])
+            #the other with two floor points and one mesh point
             tri2 = np.array([Afloor, Bfloor, A])
             self.sideTris.append(tri1)
             self.sideTris.append(tri2)
-        
         self.sidecount = len(self.sideTris)
         self.tricount += self.sidecount
 
     def generate_floor(self):
         self.floorTris = []
+        #starts at the first point in the hull
         startindex = self.hull[0][0] 
         startpoint = np.array([self.x[startindex], self.y[startindex], self.floorHeight])
         for edge in self.hull:
+            #for every two points in the hull
             i1, i2 = edge
+            #creates a triangle between the points and the startpoint
             A = np.array([self.x[i1], self.y[i1], self.floorHeight])
             B = np.array([self.x[i2], self.y[i2], self.floorHeight])
             tri = np.array([startpoint, A,B])
@@ -164,39 +172,30 @@ class pointCloud:
         self.tricount += self.floorcount
 
     def generate_normals(self):
-        #creates vectors v1 and v2along the sides of the triangles
+        #creates vectors v1 and v2 along the sides of the triangles
         A = np.stack([self.x[self.surfTris[:, 0]], self.y[self.surfTris[:, 0]], self.z[self.surfTris[:, 0]]], axis=1)
         B = np.stack([self.x[self.surfTris[:, 1]], self.y[self.surfTris[:, 1]], self.z[self.surfTris[:, 1]]], axis=1)
         C = np.stack([self.x[self.surfTris[:, 2]], self.y[self.surfTris[:, 2]], self.z[self.surfTris[:, 2]]], axis=1)
 
         #Average them to find the center point of each face
         self.face_centers = (A + B + C) / 3.0
-        #used to plot them 
+        #used to plot them later
         
         v1 = B-A #goes from a to b
         v2 = C-A #goes from a to c
 
         #creates the normal vectors using the cross products of the sides
         self.normals = np.cross(v1,v2)
+
         #normalizes every normal vector who's length is not equal to zero
         lengths = np.linalg.norm(self.normals, axis=1, keepdims=True)
         self.normals = np.divide(self.normals, lengths, out=np.zeros_like(self.normals), where=lengths!=0)
-    
-    def draw_hull(self):
-        graph.plot_trisurf(self.x, self.y, self.z, 
-                           triangles = self.sideTris,
-                           alpha = .5, linewidth = .1, edgecolor = "black", color = "red")
-        xi, yi, zi = self.x[self.hull], self.y[self.hull], self.z[self.hull]
-        print("amt of points graphed in  hull: " + str(len(xi)))
-        graph.scatter(xi,yi,zi, color = "red")
-        graph.scatter(xi,yi, self.floorHeight, color = "blue")
-        self.reset_view()
 
     def draw_surface(self):
         #plots the triangular mesh
         graph.plot_trisurf(self.x, self.y, self.z, 
                            triangles = self.surfTris,
-                           alpha = 1, linewidth = .1, edgecolor = "black")
+                           alpha = 1, linewidth = .01, edgecolor = "black", antialiased=False, shade = False)
         self.reset_view()
 
     def draw_normals(self):
@@ -235,7 +234,6 @@ class pointCloud:
         B = ([self.x[triangle[1]], self.y[triangle[1]], self.z[triangle[1]]])
         C = ([self.x[triangle[2]], self.y[triangle[2]], self.z[triangle[2]]])
 
-
         f.write(f"facet normal {normal[0]:.6f} {normal[1]:.6f} {normal[2]:.6f}\n")
         f.write("  outer loop\n")
         f.write(f"    vertex {A[0]:.6f} {A[1]:.6f} {A[2]:.6f}\n")
@@ -256,7 +254,7 @@ class pointCloud:
         print("Beginning file Creation!")
         with open(self.name + ".stl" , "w") as file:
             file.write("solid Body\n") #prints the file header
-            count = 0
+            count = 0 #used for progress bar
             #writes the surface triangles
             for index in range(self.surfacecount):
                 self.write_surface_facet(index, file)
@@ -278,23 +276,21 @@ class pointCloud:
                 count += 1
             #ends writing the solid
             file.write("endsolid")
-        
         print("\nExport complete!")
 
 
 
-#filename = "senecarocks.laz"
 
 #creates a point cloud from the file
-
-cloud = pointCloud("halfdome.laz", fid = 1000)
+cloud = pointCloud("ExampleLAZ.laz", fid = 2000)
 
 #scales the pointcloud down
 cloud.scale((2/10))
 
+#generates the mesh
 cloud.generate_mesh()
 
-#cloud.draw_surface()
-#plt.show(block = True)
+cloud.draw_surface()
+plt.show(block = True)
 
-cloud.create_STL()
+#cloud.create_STL()

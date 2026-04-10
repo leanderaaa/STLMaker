@@ -1,0 +1,5 @@
+numpy
+laspy[lazrs,laszip]
+scipy
+matplotlib
+PyQt6

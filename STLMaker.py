@@ -293,4 +293,4 @@ cloud.generate_mesh()
 cloud.draw_surface()
 plt.show(block = True)
 
-#cloud.create_STL()
+cloud.create_STL()
